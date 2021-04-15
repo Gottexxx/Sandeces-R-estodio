@@ -1,0 +1,1043 @@
+
+#################################################################################
+############################# Forecasting ######################################
+################################################################################
+
+
+
+#################################################################################
+#INSTRUCTIONS:
+#Please import Dataset from Excel,Otherwise it does not work
+#Maintain the same name of file DO NOT CHANGE THE NAME OF THE EXCEL FILE "DATA"
+#Only use the first spreadsheet "DATA"
+############################################################################
+
+
+#################################################################################
+############################# GDP Forecasting ##############################
+################################################################################
+
+# 0.Install Packages
+install.packages("TSA")
+library(TSA)
+install.packages("fpp")
+library(fpp)
+install.packages("Ecdat")
+library(Ecdat)
+install.packages(c("cluster.datasets"), dependencies = TRUE)
+library(cluster.datasets)
+install.packages("forecast")
+library(forecast)
+install.packages("seasonal")
+library(seasonal)
+install.packages("astsa")
+library(astsa)
+install.packages("reshape")
+library(reshape)
+install.packages('forecast', dependencies = TRUE)
+install.packages("devtools")
+
+# 1. Data exploration
+
+data_qgdp <- DATA
+data_qgdp$DATE <- as.Date(data_qgdp$DATE)
+qgdp <- data_qgdp$QuarterlyGDP[1:116]
+dates <- data_qgdp$DATE[1:116]
+gdp = ts(qgdp, frequency = 4, start = 1990)
+plot(as.ts(gdp), main='Quarterly Real GDP 1990-2018, Thousands of Bs.')
+
+# Test for Stationarity - Dickey-Fuller Test
+adf.test(gdp, alternative = "stationary")
+
+#ACF and PACF
+acf(gdp, lag.max=20) 
+acf(gdp, lag.max=20, plot=FALSE)
+pacf(gdp, lag.max=20) 
+pacf(gdp, lag.max=20, plot=FALSE)
+
+#Detect seasonality: Fourier transf
+p = periodogram(gdp)
+dd = data.frame(freq=p$freq, spec=p$spec)
+order = dd[order(-dd$spec),]
+top2 = head(order, 2)
+top2
+time = 1/top2$f
+time
+
+# 2. Adjust Seasonality - Method X-13 SEATS 
+
+seas(gdp)
+ajuste <- seas(gdp)
+plot(ajuste)
+qs(ajuste)
+plot(seas(gdp))
+final(ajuste)
+
+# 3. Take logs (t/t-1) --> Growth Rate
+
+diff(log(final(ajuste)), lag=1)
+log_gdp = diff(log(final(ajuste)), lag=1)
+log_qgdp <- log_gdp
+plot(as.ts(log_qgdp))
+
+#Check Stationarity 
+tseries::adf.test(log_qgdp, alternative = "stationary")
+Acf(log_qgdp, main='')
+Pacf(log_qgdp, main='')
+
+# 4. ARIMA Models 
+
+#Model 1
+auto.arima(log_qgdp, seasonal=FALSE)
+Model1 <- auto.arima(log_qgdp, seasonal=FALSE)
+
+#Model 2
+arima(log_qgdp, order = c(4,0,1))
+Model2 <- arima(log_qgdp, order = c(4,0,1))
+
+#Model 3
+arima(log_qgdp, order = c(4,0,0))
+Model3 <- arima(log_qgdp, order = c(4,0,0))
+
+#Model 4
+arima(log_qgdp, order = c(2,0,1))
+Model4 <- arima(log_qgdp, order = c(2,0,1))
+
+
+# 5. Evaluation Process
+
+###################################################################
+###################################################################
+
+# 5.1. ARIMA Models 
+
+#Model 1G
+auto.arima(log_qgdp, seasonal=FALSE)
+Model1 <- auto.arima(log_qgdp, seasonal=FALSE)
+Model1G <- auto.arima(log_qgdp, seasonal=FALSE)
+
+arima(log_qgdp, order = c(2,0,2))
+Model1G <- arima(log_qgdp, order = c(2,0,2))
+
+#Model 2G
+arima(log_qgdp, order = c(4,0,1))
+Model2G <- arima(log_qgdp, order = c(4,0,1))
+
+#Model 3G
+arima(log_qgdp, order = c(4,0,0))
+Model3G <- arima(log_qgdp, order = c(4,0,0))
+
+#Model 4G
+arima(log_qgdp, order = c(2,0,1))
+Model4G <- arima(log_qgdp, order = c(1,0,1))
+
+# 5.2. Test coefficients - p-value
+
+coeftest(Model1G)
+coeftest(Model2G)
+coeftest(Model3G)
+coeftest(Model4G)
+
+#5.3. Evaluation - residuals (models)
+
+#Model 1G
+acf(Model1G$residuals, lag.max=20)
+plot.ts(Model1G$residuals)
+qqnorm(Model1G$residuals)
+Box.test(resid(Model1G),type="Ljung")
+
+#Model 2G
+acf(Model2G$residuals, lag.max=20)
+plot.ts(Model2G$residuals)
+qqnorm(Model2G$residuals)
+Box.test(resid(Model2G),type="Ljung")
+
+#Model 3G
+acf(Model3G$residuals, lag.max=20)
+plot.ts(Model3G$residuals)
+qqnorm(Model3G$residuals)
+Box.test(resid(Model3G),type="Ljung")
+
+#Model 4G
+acf(Model4G$residuals, lag.max=20)
+plot.ts(Model4G$residuals)
+qqnorm(Model4G$residuals)
+Box.test(resid(Model4G),type="Ljung")
+
+
+# 5.4. Evaluate Forecasting Stage 1
+
+#Model (1) ARMA(2,0,2) 
+tseries::adf.test(log_qgdp, alternative = "stationary")
+arima(ts(log_qgdp), order=c(2,0,2))
+fit1G<-arima(ts(log_qgdp), order=c(2,0,2))
+tsdisplay(residuals(fit1G), lag.max=15, main='(2,0,2) Model Residuals')
+fit1G <- Arima(log_qgdp,c(2,0,2))
+forecast(fit1G, h=8)
+accuracy(f=forecast(fit1G, h=8))
+
+#Model (2) ARMA(4,0,1)
+tseries::adf.test(log_qgdp, alternative = "stationary")
+arima(ts(log_qgdp), order=c(4,0,1))
+fit2G<-arima(ts(log_qgdp), order=c(4,0,1))
+tsdisplay(residuals(fit2G), lag.max=15, main='(4,0,1) Model Residuals')
+fit2G <- Arima(log_qgdp,c(4,0,1))
+forecast(fit2G, h=8)
+accuracy(f=forecast(fit2G, h=8))
+
+#Model (3) ARMA(4,0,0)
+tseries::adf.test(log_qgdp, alternative = "stationary")
+arima(ts(log_qgdp), order=c(4,0,0))
+fit3G<-arima(ts(log_qgdp), order=c(4,0,0))
+tsdisplay(residuals(fit3G), lag.max=15, main='(4,0,1) Model Residuals')
+fit3G <- Arima(log_qgdp,c(4,0,0))
+forecast(fit3G, h=8)
+accuracy(f=forecast(fit3G, h=8))
+
+#Model (4) ARMA(2,0,1)
+tseries::adf.test(log_qgdp, alternative = "stationary")
+arima(ts(log_qgdp), order=c(2,0,1))
+fit4G<-arima(ts(log_qgdp), order=c(2,0,1))
+tsdisplay(residuals(fit4G), lag.max=15, main='(2,0,1) Model Residuals')
+fit4G <- Arima(log_qgdp,c(2,0,1))
+forecast(fit4G, h=8)
+accuracy(f=forecast(fit4G, h=8))
+
+# 5.5. Evaluate Forecasting Stage 2
+library(forecast)
+
+#MSE
+
+#Model 1G
+Premo1G <- predict(Model1G,n.ahead = 24)
+mean((log_qgdp-as.numeric(Premo1G$pred))**2)
+
+#Model 2G
+Premo2G <- predict(Model2G,n.ahead = 24)
+mean((log_qgdp-as.numeric(Premo2G$pred))**2)
+
+#Model 3G
+Premo3G <- predict(Model3G,n.ahead = 24)
+mean((log_qgdp-as.numeric(Premo3G$pred))**2)
+
+#Model 4G
+Premo4G <- predict(Model4G,n.ahead = 24)
+mean((log_qgdp-as.numeric(Premo4G$pred))**2)
+
+library(forecast)
+
+#RMSE
+
+#Model 1G
+Premo1G <- predict(Model1G,n.ahead = 24)
+sqrt(mean((log_qgdp-as.numeric(Premo1G$pred))**2))
+
+#Model 2G
+Premo2G <- predict(Model2G,n.ahead = 24)
+sqrt(mean((log_qgdp-as.numeric(Premo2G$pred))**2))
+
+#Model 3G
+Premo3G <- predict(Model3G,n.ahead = 24)
+sqrt(mean((log_qgdp-as.numeric(Premo3G$pred))**2))
+
+#Model 4
+Premo4G <- predict(Model4G,n.ahead = 24)
+sqrt(mean((log_qgdp-as.numeric(Premo4G$pred))**2))
+
+# 5.6. Evaluate Forecasting Stage 3
+
+#Diebold-Mariano Test
+
+f1G <- forecast(fit1G, h=8)
+f2G <- forecast(fit2G, h=8)
+f3G <- forecast(fit3G, h=8)
+f4G <- forecast(fit4G, h=8)
+
+dm.test(residuals(f1G),residuals(f2G),h=8)
+dm.test(residuals(f2G),residuals(f3G),h=8)
+dm.test(residuals(f3G),residuals(f4G),h=8)
+dm.test(residuals(f1G),residuals(f3G),h=8)
+dm.test(residuals(f2G),residuals(f4G),h=8)
+
+#Accuracy Test
+
+accuracy(f=forecast(fit1G, h=8))
+accuracy(f=forecast(fit2G, h=8))
+accuracy(f=forecast(fit3G, h=8))
+accuracy(f=forecast(fit4G, h=8))
+
+#White Noise Test
+
+checkresiduals(forecast(fit1G, h=8))
+checkresiduals(forecast(fit1G, h=8))
+checkresiduals(forecast(fit1G, h=8))
+checkresiduals(forecast(fit1G, h=8))
+
+#LOOP-->out of sample
+
+far1 <- function(x, h){forecast(Arima(log_qgdp, order=c(2,0,2)), h=h)}
+e <- tsCV(log_qgdp, far2, h=1)
+e <- tsCV(log_qgdp, far2, h=1, window=30)
+
+far2 <- function(x, h){forecast(Arima(log_qgdp, order=c(4,0,1)), h=h)}
+e <- tsCV(log_qgdp, far2, h=1)
+e <- tsCV(log_qgdp, far2, h=1, window=30)
+
+far3 <- function(x, h){forecast(Arima(log_qgdp, order=c(4,0,0)), h=h)}
+e <- tsCV(log_qgdp, far2, h=1)
+e <- tsCV(log_qgdp, far2, h=1, window=30)
+
+far4 <- function(x, h){forecast(Arima(log_qgdp, order=c(2,0,1)), h=h)}
+e <- tsCV(log_qgdp, far2, h=1)
+e <- tsCV(log_qgdp, far2, h=1, window=30)
+
+###################################################################
+###################################################################
+
+###################################################################
+###### Best process: ARMA(2,0,2) According to Evaluation #########
+###################################################################
+
+
+# 6. Out-Sample Forecasting Model (1) ARMA(2,0,2) - The Best one according 
+# with evaluation
+
+tseries::adf.test(log_qgdp, alternative = "stationary")
+Acf(log_qgdp, main='')
+Pacf(log_qgdp, main='')
+arima(ts(log_qgdp), order=c(2,0,2))
+fit<-arima(ts(log_qgdp), order=c(2,0,2))
+tsdisplay(residuals(fit), lag.max=15, main='(2,0,2) Model Residuals')
+fit <- Arima(log_qgdp,c(2,0,2))
+plot(forecast(fit, h=8), main = "GDP - Out of Sample Forecast  (2019-2020)")
+forecast(fit, h=8)
+
+
+# 7. In Sample Forecasting Model (1) ARMA(2,0,2)
+fit2 <-fitted.values(Model1)
+Insample <- cbind(fit2, log_qgdp)
+plot.ts(Insample,plot.type = "single", col=c("blue","black"), main="GDP - In-sample and Out Forecast")
+
+hold <- window(ts(log_qgdp), start=60)
+fit_no_holdout = Arima(log_qgdp[-c(60:116)], c(2,0,2))
+fcast_no_holdout <- forecast(fit_no_holdout,h=56)
+plot(fcast_no_holdout, main=" ")
+lines(ts(log_qgdp))
+fcast_no_holdout
+
+
+
+
+#################################################################################
+#############################Inflation Forecasting 5##############################
+################################################################################
+
+# 0.Install Packages
+library(tseries)
+library(TSA)
+library(fpp)
+library(Ecdat)
+library(cluster.datasets)
+library(forecast)
+library(seasonal)
+library(astsa)
+library(reshape)
+# 1. Data exploration
+
+data_mInflation <- DATA
+data_mInflation$Time <- as.Date(data_mInflation$Time)
+mInflation <- data_mInflation$Inflation[1:336]
+dates <- data_mInflation$DATE[1:336]
+Inflationseries = ts(mInflation, frequency = 12, start = 1991)
+plot(as.ts(Inflationseries), main='Inflation Rates 1991-2018')
+
+summary(Inflationseries)
+plot.ts(Inflationseries, ylab = "Inflation")
+
+# Test for Stationarity - Dickey-Fuller Test
+adf.test(Inflationseries, alternative = "stationary")
+
+
+#2 Decomposition
+library(forecast)
+
+Inflationde <- stl(Inflationseries, s.window = "periodic")
+Ideseasonal <-  seasadj(Inflationde)  #Arima Model
+plot(Inflationde)
+
+
+# Test for Stationarity - Dickey-Fuller Test
+adf.test(Ideseasonal, alternative = "stationary")
+
+
+#3. ARIMA Model
+
+auto.arima(Ideseasonal, seasonal = FALSE)
+
+Model1I <- auto.arima(Ideseasonal, seasonal = FALSE)
+
+Model2I <- arima(Ideseasonal, order = c(1,0,4))
+
+Model3I <- arima(Ideseasonal, order = c(6,1,1))
+
+#4. Test coefficients - p-value 
+coeftest(Model1I)
+coeftest(Model2I)
+coeftest(Model3I)
+
+#5 Evaluation of models residuals
+
+#Model 1
+acf(Model1I$residuals, lag.max=20)
+plot.ts(Model1I$residuals)
+qqnorm(Model1I$residuals)
+Box.test(resid(Model1I),type="Ljung")
+
+#Model 2
+acf(Model2I$residuals, lag.max=20)
+plot.ts(Model2I$residuals)
+qqnorm(Model2I$residuals)
+Box.test(resid(Model2I),type="Ljung")
+
+#Model 3
+acf(Model3I$residuals, lag.max=20)
+plot.ts(Model3I$residuals)
+qqnorm(Model3I$residuals)
+Box.test(resid(Model3I),type="Ljung")
+
+#6 Evaluation of Forecasting - Models
+
+#Stage 1 - Accuracy
+
+#Model (1) 
+fit1I  <- forecast(Model1I, h=24)
+accuracy(fit1I)
+
+#Model (2) 
+arima(Ideseasonal, order = c(1,0,4))
+fit2I<-Arima(Ideseasonal, order = c(1,0,4))
+forecast(fit2I, h=24)
+accuracy(f=forecast(fit2I, h=24))
+
+#Model (3) 
+arima(Ideseasonal, order = c(6,1,1))
+fit3I<-Arima(Ideseasonal, order = c(6,1,1))
+forecast(fit3I, h=24)
+accuracy(f=forecast(fit3I, h=24))
+
+#Stage 2 #MSE
+
+#Model 1
+Premo1I <- predict(Model1I,n.ahead = 24)
+mean((Ideseasonal-as.numeric(Premo1I$pred))**2)
+
+#Model 2
+Premo2I <- predict(Model2I,n.ahead = 24)
+mean((Ideseasonal-as.numeric(Premo2I$pred))**2)
+
+#Model 3
+Premo3I <- predict(Model3I,n.ahead = 24)
+mean((Ideseasonal-as.numeric(Premo3I$pred))**2)
+
+
+#Stage 3 #RMSE
+
+#Model 1
+Premo1I <- predict(Model1I,n.ahead = 24)
+sqrt(mean((Ideseasonal-as.numeric(Premo1I$pred))**2))
+
+#Model 2
+Premo2I <- predict(Model2I,n.ahead = 24)
+sqrt(mean((Ideseasonal-as.numeric(Premo2I$pred))**2))
+
+#Model 3
+Premo3I <- predict(Model3I,n.ahead = 24)
+sqrt(mean((Ideseasonal-as.numeric(Premo3I$pred))**2))
+
+#Stage 3
+#Diebold-Mariano Test
+
+f1I <- forecast(fit1I, h=24)
+f2I <- forecast(fit2I, h=24)
+f3I <- forecast(fit3I, h=24)
+
+
+dm.test(residuals(f1I),residuals(f2I),h=24)
+dm.test(residuals(f2I),residuals(f3I),h=24)
+dm.test(residuals(f1I),residuals(f3I),h=24)
+
+#White Noise Test
+
+checkresiduals(forecast(fit1I, h=24))
+checkresiduals(forecast(fit2I, h=24))
+checkresiduals(forecast(fit3I, h=24))
+
+
+
+###################################################################
+###### Best process: ARMA(1,0,4) According to Evaluation #########
+###################################################################
+
+
+###################################################################
+###### Best process: ARMA(1,0,4) According to Evaluation #########
+###################################################################
+
+
+# 7. Forecast Model 
+
+forecast(fit2I, h=24)
+poi <- plot((forecast(fit2I, h=24)), main = "Inflation - (2019-2020)")
+
+
+# 8. In Sample Forecasting Model 
+pofit <- fitted.values(Model1I)
+InsampleI <- cbind(pofit,Ideseasonal)
+plot.ts(InsampleI,plot.type = "single", col=c("blue","black"), 
+        main="Inflation Rate - In-sample Forecast")
+
+# 8. Out Sample Forecasting Model 
+
+Inflationseries2 <- ts(Ideseasonal, frequency=12, start=c(1991,1), end=c(2011,12))
+Inflationde2 <- stl(Inflationseries2, s.window = "periodic")
+Ideseasonal2 <-  seasadj(Inflationde2)  #Arima Model
+plot(Inflationde2)
+fit2I2 <-auto.arima(Ideseasonal2, seasonal = FALSE)
+Info2 <-forecast(fit2I2, h=12)
+poi <- plot((forecast(fit2I2, h=12)), main = "Inflation - Out of Sample Forecast  (2012-2013)")
+
+#################################################################################
+#############################Oil Prices Forecasting 1##############################
+################################################################################
+
+# 1. Data exploration
+
+data_mOil <- DATA
+data_mOil$Time <- as.Date(data_mOil$DATE)
+mOil <- data_mOil$OIL[1:116]
+dates <- data_mOil$DATE[1:116]
+Oil = ts(mOil, frequency = 12, start = 1991)
+
+plot(as.ts(Oil), main='Monthly Prices Oil')
+
+
+# Test for Stationarity - Dickey-Fuller Test
+adf.test(Oil, alternative = "stationary")
+
+
+# 2. Transformation of data 
+
+logoil <- log(Oil)
+plot.ts(logoil, ylab = "Oil Prices")
+
+# Test for Stationarity - Dickey-Fuller Test
+adf.test(logoil, alternative = "stationary")
+
+#ACF and PACF
+acf(logoil, lag.max=20) 
+acf(logoil, lag.max=20, plot=FALSE)
+pacf(logoil, lag.max=20) 
+pacf(logoil, lag.max=20, plot=FALSE)
+
+# 3. Decomposition
+
+delogoil <- stl(logoil, s.window = "periodic")
+Odeseasonal <-  seasadj(delogoil)  #Arima Model
+plot(delogoil)
+
+# 4. Models - Arima
+auto.arima(Odeseasonal, seasonal = FALSE)
+Model1O <- auto.arima(Odeseasonal, seasonal = FALSE)
+
+Model2O <- arima(Odeseasonal, order = c(1,1,1))
+
+Model3O <- arima(Odeseasonal, order = c(6,1,1))
+
+#4. Test coefficients - p-value 
+coeftest(Model1O)
+coeftest(Model2O)
+coeftest(Model3O)
+
+#5 Evaluation of models residuals
+
+#Model 1
+acf(Model1O$residuals, lag.max=20)
+plot.ts(Model1O$residuals)
+qqnorm(Model1O$residuals)
+Box.test(resid(Model1O),type="Ljung")
+
+#Model 2
+acf(Model2O$residuals, lag.max=20)
+plot.ts(Model2O$residuals)
+qqnorm(Model2O$residuals)
+Box.test(resid(Model2O),type="Ljung")
+
+#Model 3
+acf(Model3O$residuals, lag.max=20)
+plot.ts(Model3O$residuals)
+qqnorm(Model3O$residuals)
+Box.test(resid(Model3O),type="Ljung")
+
+
+#7 Evaluation of Forecasting - Models
+
+#Stage 1 - Accuracy
+
+#Model (1) 
+fit1O  <- forecast(Model1O, h=24)
+accuracy(fit1O)
+
+#Model (2) 
+arima(Odeseasonal, order = c(1,1,1))
+fit2O<-Arima(Odeseasonal, order = c(1,1,1))
+forecast(fit2O, h=24)
+accuracy(f=forecast(fit2O, h=24))
+
+#Model (3) 
+arima(Odeseasonal, order = c(6,1,1))
+fit3O<-Arima(Odeseasonal, order = c(6,1,1))
+forecast(fit3O, h=24)
+accuracy(f=forecast(fit3O, h=24))
+
+#Stage 2 #MSE
+
+#Model 1
+Premo1O <- predict(Model1O,n.ahead = 24)
+mean((Odeseasonal-as.numeric(Premo1O$pred))**2)
+
+#Model 2
+Premo2O <- predict(Model2O,n.ahead = 24)
+mean((Odeseasonal-as.numeric(Premo2O$pred))**2)
+
+#Model 3
+Premo3O <- predict(Model3O,n.ahead = 24)
+mean((Odeseasonal-as.numeric(Premo3O$pred))**2)
+
+
+#Stage 3 #RMSE
+
+#Model 1
+Premo1O <- predict(Model1O,n.ahead = 24)
+sqrt(mean((Odeseasonal-as.numeric(Premo1O$pred))**2))
+
+#Model 2
+Premo2O <- predict(Model2O,n.ahead = 24)
+sqrt(mean((Odeseasonal-as.numeric(Premo2O$pred))**2))
+
+#Model 3
+Premo3O <- predict(Model3O,n.ahead = 24)
+sqrt(mean((Odeseasonal-as.numeric(Premo3O$pred))**2))
+
+#Stage 3
+#Diebold-Mariano Test
+
+f1O <- forecast(fit1O, h=24)
+f2O <- forecast(fit2O, h=24)
+f3O <- forecast(fit3O, h=24)
+
+
+dm.test(residuals(f1O),residuals(f2O),h=24)
+dm.test(residuals(f2O),residuals(f3O),h=24)
+dm.test(residuals(f1O),residuals(f3O),h=24)
+
+#White Noise Test
+
+checkresiduals(forecast(fit1O, h=24))
+checkresiduals(forecast(fit2O, h=24))
+checkresiduals(forecast(fit3O, h=24))
+
+
+
+
+###################################################################
+###### Best process: ARMA(1,1,1) According to Evaluation #########
+###################################################################
+
+
+# 7. Forecast Model 
+
+
+sss <- forecast(Model1O, h=24)
+plot(sss, main = "Out of Sample Quarterly Oil Prices - (2019-2020)")
+
+
+
+#################################################################################
+############################# GOV. EXPENDITURE Forecasting ##############################
+################################################################################
+
+
+# 1. Data exploration
+
+
+data_exp <- DATA
+data_exp$Date <- as.Date(data_exp$Date)
+exp <- data_exp$q_seas[1:68]
+dates <- data_exp$Date[1:68]
+expenditure = ts(exp, frequency = 4, start = 2002)
+plot(as.ts(expenditure), main='Quarterly Government Expenditure, Thousands of Bs.')
+
+# Test for Stationarity - Dickey-Fuller Test
+adf.test(expenditure, alternative = "stationary")
+
+
+#ACF and PACF
+acf(expenditure, lag.max=20) 
+acf(expenditure, lag.max=20, plot=FALSE)
+pacf(expenditure, lag.max=20) 
+pacf(expenditure, lag.max=20, plot=FALSE)
+
+#Detect seasonality: Fourier transf
+p = periodogram(expenditure)
+dd = data.frame(freq=p$freq, spec=p$spec)
+order = dd[order(-dd$spec),]
+top2 = head(order, 2)
+top2
+time = 1/top2$f
+time
+
+# 2. Adjust Seasonality - Method X-13 SEATS 
+
+seas(expenditure)
+gajuste <- seas(expenditure)
+plot(gajuste)
+qs(gajuste)
+plot(seas(expenditure))
+final(gajuste)
+
+
+# 3. Take logs (t/t-1) --> Growth Rate
+
+diff(log(final(gajuste)), lag=1)
+log_expenditure = diff(log(final(gajuste)), lag=1)
+log_gastos <- log_expenditure
+plot(as.ts(log_gastos), main='')
+
+#Check Stationarity 
+tseries::adf.test(log_gastos, alternative = "stationary")
+Acf(log_gastos, main='')	
+Pacf(log_gastos, main='')
+
+
+# 4. ARIMA Models 
+
+#Model 1
+auto.arima(log_gastos, seasonal=FALSE)
+Model11 <- auto.arima(log_gastos, seasonal=FALSE)
+
+
+#Model 2
+arima(log_gastos, order = c(1,0,1))
+Model22 <- arima(log_gastos, order = c(1,0,1))
+
+#Model 3
+arima(log_gastos, order = c(2,0,1))
+Model33 <- arima(log_gastos, order = c(2,0,1))
+
+
+#Model 4
+arima(log_gastos, order = c(0,0,1))
+Model44 <- arima(log_gastos, order = c(0,0,1))
+
+# 5. Evaluation Process
+
+###################################################################
+###################################################################
+
+# 5.1. ARIMA Models 
+
+#Model 1G
+arima(log_gastos, order = c(1,0,0))
+Model1E <- arima(log_gastos, order = c(1,0,0))
+
+#Model 2G
+arima(log_gastos, order = c(1,0,1))
+Model2E <- arima(log_gastos, order = c(1,0,1))
+
+#Model 3G
+arima(log_gastos, order = c(2,0,1))
+Model3E <- arima(log_gastos, order = c(2,0,1))
+
+#Model 4G
+arima(log_gastos, order = c(0,0,1))
+Model4E <- arima(log_gastos, order = c(0,0,1))
+
+# 5.2. Test coefficients - p-value
+
+coeftest(Model1E)
+coeftest(Model2E)
+coeftest(Model3E)
+coeftest(Model4E)
+
+#5.3. Evaluation - residuals (models)
+
+#Model 1G
+acf(Model1E$residuals, lag.max=20)
+plot.ts(Model1E$residuals)
+qqnorm(Model1E$residuals)
+Box.test(resid(Model1E),type="Ljung")
+
+#Model 2G
+acf(Model2E$residuals, lag.max=20)
+plot.ts(Model2E$residuals)
+qqnorm(Model2E$residuals)
+Box.test(resid(Model2E),type="Ljung")
+
+#Model 3E
+acf(Model3E$residuals, lag.max=20)
+plot.ts(Model3E$residuals)
+qqnorm(Model3E$residuals)
+Box.test(resid(Model3E),type="Ljung")
+
+#Model 4E
+acf(Model4E$residuals, lag.max=20)
+plot.ts(Model4E$residuals)
+qqnorm(Model4E$residuals)
+Box.test(resid(Model4E),type="Ljung")
+
+
+# 5.4. Evaluate Forecasting Stage 1
+
+#Model (1) ARMA(1,0,0) 
+tseries::adf.test(log_gastos, alternative = "stationary")
+arima(ts(log_gastos), order=c(1,0,0))
+fit1E<-arima(ts(log_gastos), order=c(1,0,0))
+tsdisplay(residuals(fit1E), lag.max=15, main='(1,0,0) Model Residuals')
+fit1E <- Arima(log_gastos,c(1,0,0))
+forecast(fit1E, h=8)
+accuracy(f=forecast(fit1E, h=8))
+
+#Model (2) ARMA(1,0,1)
+tseries::adf.test(log_gastos, alternative = "stationary")
+arima(ts(log_gastos), order=c(1,0,1))
+fit2E<-arima(ts(log_gastos), order=c(1,0,1))
+tsdisplay(residuals(fit2E), lag.max=15, main='(1,0,1) Model Residuals')
+fit2E <- Arima(log_gastos,c(1,0,1))
+forecast(fit2E, h=8)
+accuracy(f=forecast(fit2E, h=8))
+
+#Model (3) ARMA(2,0,1)
+tseries::adf.test(log_gastos, alternative = "stationary")
+arima(ts(log_gastos), order=c(2,0,1))
+fit3E<-arima(ts(log_gastos), order=c(2,0,1))
+tsdisplay(residuals(fit3E), lag.max=15, main='(2,0,1) Model Residuals')
+fit3E <- Arima(log_gastos,c(2,0,1))
+forecast(fit3E, h=8)
+accuracy(f=forecast(fit3G, h=8))
+
+#Model (4) ARMA(0,0,1)
+tseries::adf.test(log_gastos, alternative = "stationary")
+arima(ts(log_gastos), order=c(0,0,1))
+fit4E<-arima(ts(log_gastos), order=c(0,0,1))
+tsdisplay(residuals(fit4E), lag.max=15, main='(0,0,1) Model Residuals')
+fit4E <- Arima(log_gastos,c(0,0,1))
+forecast(fit4E, h=8)
+accuracy(f=forecast(fit4E, h=8))
+
+# 5.5. Evaluate Forecasting Stage 2
+library(forecast)
+
+#MSE
+
+#Model 1E
+Premo1E <- predict(Model1E,n.ahead = 24)
+mean((log_gastos-as.numeric(Premo1E$pred))**2)
+
+#Model 2E
+Premo2E <- predict(Model2E,n.ahead = 24)
+mean((log_gastos-as.numeric(Premo2E$pred))**2)
+
+#Model 3E
+Premo3E <- predict(Model3E,n.ahead = 24)
+mean((log_gastos-as.numeric(Premo3E$pred))**2)
+
+#Model 4E
+Premo4E <- predict(Model4E,n.ahead = 24)
+mean((log_gastos-as.numeric(Premo4E$pred))**2)
+
+library(forecast)
+
+#RMSE
+
+#Model 1E
+Premo1E <- predict(Model1E,n.ahead = 24)
+sqrt(mean((log_gastos-as.numeric(Premo1E$pred))**2))
+
+#Model 2E
+Premo2E <- predict(Model2E,n.ahead = 24)
+sqrt(mean((log_gastos-as.numeric(Premo2E$pred))**2))
+
+#Model 3G
+Premo3E <- predict(Model3E,n.ahead = 24)
+sqrt(mean((log_gastos-as.numeric(Premo3E$pred))**2))
+
+#Model 4E
+Premo4E <- predict(Model4E,n.ahead = 24)
+sqrt(mean((log_gastos-as.numeric(Premo4E$pred))**2))
+
+# 5.6. Evaluate Forecasting Stage 3
+
+#Diebold-Mariano Test
+
+f1E <- forecast(fit1E, h=8)
+f2E <- forecast(fit2E, h=8)
+f3E <- forecast(fit3E, h=8)
+f4E <- forecast(fit4E, h=8)
+
+dm.test(residuals(f1E),residuals(f2E),h=8)
+dm.test(residuals(f2E),residuals(f3E),h=8)
+dm.test(residuals(f3E),residuals(f4E),h=8)
+dm.test(residuals(f1E),residuals(f3E),h=8)
+dm.test(residuals(f2E),residuals(f4E),h=8)
+
+#Accuracy Test
+
+accuracy(f=forecast(fit1E, h=8))
+accuracy(f=forecast(fit2E, h=8))
+accuracy(f=forecast(fit3E, h=8))
+accuracy(f=forecast(fit4E, h=8))
+
+#White Noise Test
+
+checkresiduals(forecast(fit1E, h=8))
+checkresiduals(forecast(fit1E, h=8))
+checkresiduals(forecast(fit1E, h=8))
+checkresiduals(forecast(fit1E, h=8))
+
+#LOOP-->out of sample
+
+far11 <- function(x, h){forecast(Arima(log_gastos, order=c(1,0,0)), h=h)}
+e <- tsCV(log_gastos, far11, h=1)
+e <- tsCV(log_gastos, far11, h=1, window=30)
+
+far22 <- function(x, h){forecast(Arima(log_gastos, order=c(1,0,1)), h=h)}
+e <- tsCV(log_gastos, far22, h=1)
+e <- tsCV(log_gastos, far22, h=1, window=30)
+
+far33 <- function(x, h){forecast(Arima(log_gastos, order=c(2,0,1)), h=h)}
+e <- tsCV(log_gastos, far33, h=1)
+e <- tsCV(log_gastos, far33, h=1, window=30)
+
+far44 <- function(x, h){forecast(Arima(log_gastos, order=c(0,0,1)), h=h)}
+e <- tsCV(log_gastos, far44, h=1)
+e <- tsCV(log_gastos, far44, h=1, window=30)
+
+###################################################################
+###################################################################
+
+###################################################################
+###### Best process: ARMA(1,0,0) According to Evaluation #########
+###################################################################
+
+
+# 6. Out-Sample Forecasting Model (1) ARMA(1,0,0)
+tseries::adf.test(log_gastos, alternative = "stationary")
+Acf(log_gastos, main='')
+Pacf(log_gastos, main='')
+arima(ts(log_gastos), order=c(1,0,0))
+fitE<-arima(ts(log_gastos), order=c(1,0,0))
+tsdisplay(residuals(fitE), lag.max=15, main='(1,0,0) Model Residuals')
+fitE <- Arima(log_gastos,c(1,0,0))
+plot(forecast(fitE, h=8), main = "Gov. Expenditure - Out of Sample Forecast  (2019-2020)")
+forecast(uuu, h=12)
+
+# 7. In Sample Forecasting Model (1) ARMA(1,0,0)
+fit2E <-fitted.values(Model11)
+InsampleE <- cbind(fit2E, log_gastos)
+plot.ts(InsampleE,plot.type = "single", col=c("blue","black"), main="Gov. Expenditure - In sample/Out of sample  Forecast")
+
+hold <- window(ts(log_gastos), start=60)
+fit_no_holdoutE = Arima(log_gastos[-c(60:68)], c(1,0,0))
+fcast_no_holdoutE <- forecast(fit_no_holdoutE,h=8)
+plot(fcast_no_holdoutE, main=" ")
+lines(ts(log_gastos))
+fcast_no_holdoutE
+
+
+
+#################################################################################
+#############################VAR GDP AND OIL PRICES##############################
+################################################################################
+
+# 1. Data exploration
+data_qgdp <- DATA
+data_qgdp$DATE <- as.Date(data_qgdp$DATE)
+qgdp <- data_qgdp$QuarterlyGDP[1:116]
+dates <- data_qgdp$DATE[1:116]
+gdp = ts(qgdp, frequency = 4, start = 1990)
+plot(as.ts(gdp), main='Quarterly Real GDP 1990-2018, Thousands of Bs.')
+
+data_oil <- DATA
+data_oil$DATE <- as.Date(data_oil$DATE)
+qoil <- data_oil$OIL[1:116]
+dates <- data_oil$DATE[1:116]
+oil = ts(qoil, frequency = 4, start = 1990)
+
+# Test for Stationarity - Dickey-Fuller Test
+adf.test(gdp, alternative = "stationary")
+
+#ACF and PACF
+acf(gdp, lag.max=20) 
+acf(gdp, lag.max=20, plot=FALSE)
+pacf(gdp, lag.max=20) 
+pacf(gdp, lag.max=20, plot=FALSE)
+
+#Detect seasonality: Fourier transf
+p = periodogram(gdp)
+dd = data.frame(freq=p$freq, spec=p$spec)
+order = dd[order(-dd$spec),]
+top2 = head(order, 2)
+top2
+time = 1/top2$f
+time
+
+# 2. Adjust Seasonality - Method X-13 SEATS 
+
+seas(gdp)
+ajusteG <- seas(gdp)
+plot(ajusteG)
+qs(ajusteG)
+plot(seas(gdp))
+final(ajusteG)
+
+# 3.logs (t/t-1) 
+
+diff(log(final(ajusteG)), lag=1)
+log_gdp = diff(log(final(ajusteG)), lag=1)
+log_qgdp <- log_gdp
+plot(as.ts(log_qgdp))
+
+diff(log(oil), lag=1)
+log_oil = diff(log(oil), lag=1)
+log_qoil <- log_oil
+plot(as.ts(log_qoil))
+
+#Check Stationarity 
+
+tseries::adf.test(log_qgdp, alternative = "stationary")
+Acf(log_qgdp, main='')
+Pacf(log_qgdp, main='')
+
+# 4. VAR MODEL "GDP AND OIL PRICES RATE "
+library(vars)
+#Model
+modelgo <- VAR(data.frame(log_qgdp,log_qoil), type = 'const', 
+               lag.max = 2, ic="AIC")
+coeftest(modelgo)
+
+# Impulse Response Function
+plot(irf(modelgo,n.ahead=10))
+
+# Granger Causality
+library(lmtest)
+# Ho = Oil prices does not Granger cause GDP
+grangertest(`log_qgdp` ~log_qoil, order=2)
+#Reject Ho, thus oil prices is Granger cause GDP
+
+# Ho = GDP does not Granger cause Oil Prices
+grangertest(`log_qoil` ~log_qgdp, order=2)
+#Reject Ho, thus oil prices is Granger cause GDP
+
+
+uuu <- auto.arima(log_qoil, seasonal = FALSE)
+mo <- forecast(uuu, h=24)
