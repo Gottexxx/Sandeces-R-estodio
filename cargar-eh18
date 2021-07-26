@@ -1,0 +1,8 @@
+setwd("F:/paper_labor/EH2018/CSV")
+library(readr) #Importa de csv
+P = read_delim("EH2018_Personas.csv",";", escape_double = FALSE, trim_ws = TRUE)
+E = read_delim("EH2018_Equipamiento.csv",";", escape_double = FALSE, trim_ws = TRUE)
+SAf = read_delim("EH2018_SeguridadAlimentariafies.csv",";", escape_double = FALSE, trim_ws = TRUE)
+SA = read_delim("EH2018_SeguridadAlimentaria.csv",";", escape_double = FALSE, trim_ws = TRUE)
+GNA = read_delim("EH2018_GastosNoAlimentarios.csv",";", escape_double = FAL
+  write.csv(P_Jefe, "P_Jefe.csv")
