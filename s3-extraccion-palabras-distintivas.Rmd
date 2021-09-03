@@ -1,0 +1,350 @@
+---
+title: "s3-extraccion-palabras-distintivas"
+author: "SimianTuFader"
+date: "21/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Panoramation
+
+**El objetivo:** Encontrar las palabras más distintivas en las diferentes obras de Charles Dickens
+
+*Aqui:*
+
+- COmo preprocesar documentos
+- como calcular los valores tf-idf
+
+Las ideas y métodos provienen del libro de Julia Sielge _*tidytext*_ y de el russian nibba Rybxz (link HSE) [tidytext](https://juliasielge.com/).
+
+# Paso 1
+
+Carga los paquetes necesarios en la sesión actual de R. Neceistará varios paquetes: `tidyverse`, `tidytext`, `snowballc`, `udpipe` y `gutembergr`.
+
+```{r}
+library(tidyverse)
+library(tidytext)
+library(SnowballC)
+library(udpipe)
+library(gutenbergr)
+```
+
+
+# Paso 2
+
+Encuentra los siguientes libros en los datos `gutemberg_metadata` al interior del paquete `gutembergr`: A Tale of Two Cities, Martin Chuzzlewit, Barnaby Rudge: A Tale of the Riots of 'Eighty, Nicholas Nickleby, The Pickwick Papers, Little Dorrit, Oliver Twist, Bleak House, David Copperfield, y Great Expectations. Extrae los valores de `gutenberg_id` con la función `pull()`para estos libros y asigna estos valores a la variable `dickens_books_id`. Necesitarás `gutenberg_id` solo para estos casos, cuando `has_text` sea `True`.
+
+```{r}
+dickens_books_id <- gutenberg_metadata %>%
+  filter(
+    title %in% c("A Tale of Two Cities", "Martin Chuzzlewit", "Barnaby Rudge: A Tale of the Riots of 'Eighty", "Nicholas Nickleby", "The Pickwick Papers", "Little Dorrit", "Oliver Twist", "Bleak House", "David Copperfield", "Great Expectations" ),
+    language == "en",
+    has_text
+  ) %>%
+  pull(gutenberg_id)
+dickens_books_id
+
+```
+
+# Paso 3
+
+Descarga estos libros con `gutenberg_download()` con sus títulos incluidos y asigna los resultados a la varialbe `dickens_books`. Usa `?gutenberg_download()` para tener el detalle de qué ahce esta función. Si hay problemas con el _mirror_ por defecto, se pueden escoger los mirrors de la lista [esteps](https://www.gutenberg.org/MIRRORS.ALL).
+
+```{r}
+dickens_books <- gutenberg_download(dickens_books_id, meta_fields = "title", mirror = "http://mirror.csclub.uwaterloo.ca/gutenberg/")
+```
+
+Limpia el dataset resultante de las cadenas vacías
+
+```{r}
+dickens_books
+view(dickens_books) # Aqui se ve que está indio puro blancos
+
+dickens_books <- dickens_books %>% # esto ya pa q se guarde el dataset
+  filter(text != "") %>%
+  view()
+```
+
+¿Cuántas filas hay por libro? Ordena ("arrange") la salida por el número de filas en orden descendente.
+
+```{r}
+dickens_books %>%
+  group_by(title) %>%
+  summarize(numero_de_filas = n()) %>% # Solo se ve la variable, no se guarda en la memoria todavía
+  arrange(desc(numero_de_filas))
+
+```
+
+# Paso 4a (este es re clave)
+
+_Tokenizar_ estos documentos (usar las palabras como _tokens_) con `unnest_tokens`. Esta función automáticamente le arranca a los textos los signos de puntiación y convierte los tokens a minúsculas.
+
+```{r}
+dickens_books %>%
+  unnest_tokens(word, text)
+```
+
+Usa el _dataset_`stop_words` del `tidytext` para quitar las stop_words con la función `anti_join`.
+
+```{r}
+view(stop_words) #solo pa chekiar
+dickens_books %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words)
+```
+
+Ahora quitar los números usando el meta-caracter para dígitos y `str_detect()`.
+
+```{r}
+dickens_books %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words) %>%
+  filter(str_detect(word,"\\d+", negate = T))
+```
+
+Detiene las palabras (llévalas a su forma nuclear) con la función `wordStem()`del paquete `Snowballc`.
+
+```{r}
+dickens_books %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words) %>%
+  filter(str_detect(word,"\\d+", negate = T)) %>%
+  mutate(word = wordStem(word))
+```
+
+Combina todos estos pasos y guarda los resultados en el dataset `dickens_books_preprocesado`.
+
+```{r}
+dickens_books_preprocesado <- dickens_books %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words) %>%
+  filter(str_detect(word,"\\d+", negate = T)) %>%
+  mutate(word = wordStem(word))
+dickens_books_preprocesado # Pa ver como queda
+```
+
+# Paso 5a
+
+Calcula el conteo de palabras para cada documento co `count()`, `count(VARIABLE)` funciona de forma similar a `group_by(VARIABLE) %>% summarize(n())`.
+
+```{r}
+dickens_books_preprocesado %>%
+  count(title, word)
+```
+
+```{r}
+dickens_books_preprocesado %>%
+  group_by(title, word) %>%
+  summarize(n = n()) # Solo para probar que es lo mismo
+```
+
+
+Usa `bind_tf_idf()` en el resultado de `count()` para calcular la frecuencia de cada término, la frecuencia inversa del documento, y el producto de la frecuencia del término y la frecuencia inversa del documento para cada token. Guarda los resultados en `dickens_books_tfidf`.
+
+```{r}
+dickens_books_tfidf <- dickens_books_preprocesado %>%
+  count(title, word) %>%
+  bind_tf_idf(word, title, n)
+```
+
+# Paso 6a
+
+Encuentra las palabras más distintivas de cada documento con `group_by()` y `slice_max()`.`slice_max()` te permite seleccionar filas con los valores más altos de una variable, es decir, los valores tf-idf. `group_by()` te permite hacer esta operación por grupo, es decir por título (`title`).
+
+```{r}
+dickens_books_tfidf %>%
+  group_by(title) %>%
+  slice_max(tf_idf, n = 5)
+```
+
+#Paso 4b
+
+_Tokenizar_ estos documentos con `udpipe()`. Para que esto funcione, se debe descargar el modelo que servirá para _lematizar_ y etiquetar los tokens. Usa `udpipe_download_model()` para descargar el modelo y `udpipe_load_model()` para cargarlo. Luego se puede usar `udpipe()` para tokenizar, lematizar, etiquetar y esparcir las dependencias en los textos.
+
+```{r}
+dl <- udpipe_download_model("english")
+english_model <- udpipe_load_model(dl$file_model)
+
+?udpipe # pa saber como ordenar la cosa
+text <- dickens_books %>%
+  select(doc_id = title, text) # le cambia el nombre de la columna a doc_id
+text
+x <- udpipe(text, english_model, parallel.cores = 4L) # Se puede poner "parallel.cores = 8L" como opción si tienes más de un procesador disponible, como cuando minas bitcoins. Mi "i5-6600" solo tiene uno asi que no le pongo nada, aunque creo q se puede hasta 4 si cuenta los procesadores lógicos.
+x
+```
+
+Esta funcion devuelve un dataframecon varias características interesantes como `token`, `lemma`, `universal partos of speech tag`, `treebank-specific parts of speech tag`, `morphological features`, etc.
+
+Por ahora, trata de contar categorías de "partes del discurso" .
+
+Estas categorías de "partes del discurso" (part-of-speech en la ayuda) son usadas en `udpipe`:
+
+ADJ: adjetivo
+ADP: adposición
+ADV: adverbio
+AUX: auxiliar
+CCONJ: conjunción de coordinación
+DET: determinador
+INTJ: intersección
+NOUN: nombre (Noun)
+NUM: numeral
+PART: partícula
+PRON: pronombre
+PROPN: nombre propio
+PUNCT: puntuación
+SCONJ: conjunción subordinada
+SYM: símbolo
+VERB: verbo
+X: otro
+
+```{r}
+x %>%
+  count(upos)
+```
+
+Ahora hay que preprocesar los datos:
+
+Excluye estas "partes del discurso": `PUNCT`, `SYM`, `X`, `NUM`.
+
+```{r}
+x %>%
+  filter(!upos %in% c("PUNCT", "SYM", "X", "NUM"))
+```
+
+Ahora hay que poner en minúsculas los lemas del dataframe `x`.
+
+
+```{r}
+x %>%
+  filter(!upos %in% c("PUNCT", "SYM", "X", "NUM")) %>%
+  mutate(lemma = str_to_lower(lemma))
+```
+
+Excluir las stopwords:
+
+```{r}
+x %>%
+  filter(!upos %in% c("PUNCT", "SYM", "X", "NUM")) %>%
+  mutate(lemma = str_to_lower(lemma)) %>%
+  anti_join(stop_words, by = c("lemma" = "word"))
+```
+
+Ahora, guarda todos estos pasos en un dataframe llamado dickens_books_preprocesado_lemas
+
+
+```{r}
+dickens_books_preprocesado_lemas <- x %>%
+  filter(!upos %in% c("PUNCT", "SYM", "X", "NUM")) %>%
+  mutate(lemma = str_to_lower(lemma)) %>%
+  anti_join(stop_words, by = c("lemma" = "word"))
+dickens_books_preprocesado_lemas
+```
+
+# Paso 5b
+
+Calcula el conteo de palabras para cada documento con la función `count()`
+
+```{r}
+dickens_books_preprocesado_lemas %>%
+  count(doc_id, lemma)
+```
+
+Usa `bind_tf_idf()` para calcular la frecuencia de los términos, la frecuencia inversa de los documentos, y el producto de los términos de frecuencia y la frecuencia inversa de los documentos. Guarda los resultados en `dickens_books_lemmas_tfidf`.
+
+```{r}
+dickens_books_preprocesado_lemas %>%
+  count(doc_id, lemma) %>%
+  bind_tf_idf(lemma, doc_id, n)
+```
+
+```{r}
+dickens_books_lemas_tfidf <- dickens_books_preprocesado_lemas %>%
+  count(doc_id, lemma) %>%
+  bind_tf_idf(lemma, doc_id, n)
+```
+
+# Paso 6b
+
+Encuentra las palabras más distintivas de este dataset.
+
+```{r}
+dickens_books_lemas_tfidf %>%
+  group_by(doc_id) %>%
+  slice_max(tf_idf, n = 5)
+```
+
+También puedes visualizar los resultados con `ggplot2`. Primero, necesitas usar la función `ggplot()` en el dataset resultante con los valores tf-idf. Esta función construye el objeto diagramable inicial (initial plot object). Se debe usar el sigo `+` para añadir capas a los gráficos. Es como si `+` fueran los `%>%` en el `dplyr` pero para `ggplot2`.
+
+El poner `ggplot()` crea el sistema de coordenadas para el gráfico.
+
+
+```{r}
+dickens_books_lemas_tfidf %>%
+  group_by(doc_id) %>%
+  slice_max(tf_idf, n = 5) %>%
+  ggplot()
+```
+
+Ahora se pueden hacer gráficos de barras, de tal forma que cada barra represente un token y su altura representará los valores tf_idf. Para este fin, se puede usar `geom_col()` para crear una barra. Asimismo, necesitamos especificar un mapeo estético (aestetic) dentro, con `aes()`:
+
+
+```{r}
+dickens_books_lemas_tfidf %>%
+  group_by(doc_id) %>%
+  slice_max(tf_idf, n = 5) %>%
+  ggplot() +
+  geom_col(aes(
+    x = lemma,
+    y = tf_idf,
+    fill = lemma
+  ))
+```
+
+Donde:
+
+- `x` - lemma. Este argumento especifica que va a la coordenada x.
+- `y` - tf_idf. Este argumento especifica que va a la coordenada y. 
+- `fill` - lemma. Este argumento cambia el color de las barras. Cada barra para los lemmas tendrá un color diferente.
+
+Hemos creado un gráfico, sin embargo, no nos ayuda a entender de donde vienen los lemas. Para añadir esta información, podemos utilizar `facet_wrap()`. Esto ayuda a mostrar tu gráfico en facetas en lugar de en un solo gráfico. De esta forma podemos especificar `doc_id` como la varialbe para definir las facetas (como los grupos).
+Funciona de una forma similar a `group_by()` pero para gráficos del `ggplot2`. Un argumento adicional es crucial: `scales`. Necesitamos cambiar el valor `scales` a `free`. Esto nos ayudará a msotrar solo los lemas relevantes en cada faceta.
+
+```{r}
+dickens_books_lemas_tfidf %>%
+  group_by(doc_id) %>%
+  slice_max(tf_idf, n = 5) %>%
+  ggplot() +
+  geom_col(aes(
+    x = lemma,
+    y = tf_idf,
+    fill = lemma
+  )) + 
+  facet_wrap(vars(doc_id), scales = "free")
+```
+
+Podemos mejorar este gráfico en varias formas:
+
+- Removiendo la leyenda con `theme(legend.position = "none")`
+- rotando las coordenadas con `coord_flip()`
+- añadiendoun título y otras descripciones con labs(title = "pon aqui tu título", x = "el nombre de la coordenada x", y = "el nombre de y").
+
+Además el gráfico se puede guardar en el archivo ".r", no en el markdown.
+
+
+```{r}
+dickens_books_lemas_tfidf %>%
+  group_by(doc_id) %>%
+  slice_max(tf_idf, n = 5) %>%
+  ggplot() +
+  geom_col(aes(
+    x = lemma,
+    y = tf_idf,
+    fill = lemma
+  )) + 
+  facet_wrap(vars(doc_id), scales = "free") + 
+  coord_flip() +
+  theme(legend.position = "none")
+```

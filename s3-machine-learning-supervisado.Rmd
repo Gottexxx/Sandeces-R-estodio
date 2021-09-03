@@ -1,0 +1,200 @@
+---
+title: "s3-machine-learning-supervisado"
+author: "SimianTuFader"
+date: "21/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Panoramation siempre ps
+
+**El objetivo:** es predecir el título del libro por su contenido. Trabajaremos con dos novelas populares de Dickens, "Oliver Twist" y "A Tale of Two Cities". Intentaremos predecir si la línea específica es de "A Tale of Two Cities" o no.
+
+Lo que se chekea:
+
+- Como hacer un _train-test split_
+- Como crear una matriz de términos documentales _(document-term matrix)_
+- Como ajustar una regresión logística regularizada en data textual
+- Como evaluar un modelo de _machine-learning_ supervizado
+
+# Paso 1
+
+Carga los paquetes necesarios en la sesión alcual de R. Se necesitarán varios paquetes: `tidyverse`, `tidytext`, `udpipe`, `gutenbergr`, `rsample` `glmnet` y `yardstick`
+
+```{r}
+# install.packages(c("tidyverse", "tidytext", "udpipe", "gutenbergr", "rsample", "glmnet", "yardstick"))
+# install.packages(c("rsample", "glmnet", "yardstick")) # este si he instalado
+
+library(tidyverse)
+library(tidytext)
+library(udpipe)
+library(gutenbergr)
+library(rsample)
+library(glmnet)
+library(yardstick)
+```
+
+# Paso 2
+
+Encuentra estos dos libros en el dataset `gutenberg_metadata` dentro del paquete `gutenbergr`: "Oliver Twist" y "A Tale of Two Cities". Descarga estos libros con `gutenberg_download()`, incluye sus títulos en tu data y asigna los resultados a `twist_tale`.
+
+```{r}
+twist_tale <- gutenberg_metadata %>%
+  filter(
+    title %in% c("A Tale of Two Cities", "Oliver Twist"),
+    has_text,
+    language == "en") %>%
+  pull(gutenberg_id) %>%
+  gutenberg_download(meta_fields = "title")
+twist_tale # solo pa ver si habia jalado bien del mirror por defecto. Se ve que tiene muchos espacios
+```
+
+Ahora limpia este dataset de las cadenas vacias _(strings)_
+
+```{r}
+twist_tale <- twist_tale %>%
+  filter(text != "")
+
+View(twist_tale)
+```
+
+# Paso 3
+
+Crea las siguientes dos variables con `mutate()`:
+
+- `es_two_cities` (integer): 1 si el libro es "A Tale of Two Cities" o 0 si el libro es "Oliver Twist". Puedes usar ya sea `if_else()` o `case_when`,
+- `line_id` (integer): id de la linea con `row_number()`
+
+```{r}
+twist_tale <- twist_tale %>%
+  mutate(
+    es_two_cities = case_when(
+      title == "A Tale of Two Cities" ~ 1L,
+      title == "Oliver Twist" ~ 0L
+    ),
+    line_id = row_number()
+  )%>%
+  view()
+```
+
+Guarda los resultados en `twist_tale`. ¿Cuántas líneas hay por libro?
+
+```{r}
+twist_tale %>%
+  count(title)
+```
+
+# Paso 4
+
+Prepara el dataset:
+
+- lemmatiza
+- convierte los lemmas a minúsculas
+- excluye _stopwords_
+- excluye PUNCT, SYM, X, NUM
+
+Guarda los resultados a `twist_tale_preprocesado`.
+
+```{r}
+dl <- udpipe_download_model(language = "english")
+english_model <- udpipe_load_model(dl$file_model)
+
+text <- twist_tale %>%
+  select(doc_id = line_id, text)
+
+twist_tale_preprocesado <- udpipe(text, english_model, parallel.cores = 4L)
+
+# si hubiera ya cargado el modelo aparte para q no corra y tarde años, seria asi:
+
+# twist_tale_preprocesado <- readRDS("s3_sajta_udpipe_Dickens-two-books.RDS")
+
+view(twist_tale_preprocesado)
+```
+
+Ahora minúsculas y demás:
+
+```{r}
+twist_tale_preprocesado <- twist_tale_preprocesado %>%
+  mutate(lemma = str_to_lower(lemma)) %>%
+  anti_join(stop_words, by = c("lemma" = "word")) %>%
+  filter(upos %in% c("PUNCT", "SYM", "X", "NUM"))
+
+```
+
+# Paso 4a
+
+Crear un _train-test split_, que se refiere a cortar la muestra para entrenar el algoritmo enay. Usa `initial_split()` del paquete `rsample`en `twist_tale`. Usa `?initial_split()`para ver cómo funciona exactamente este comando. Usa `training()` y `testing()` para guardar las partes de entrenamiento y prueba de esta división de la muestra.
+
+```{r}
+set.seed(1234L)
+twist_tale_split <- initial_split(twist_tale)
+twist_tale_training <- training(twist_tale_split)
+twist_tale_testing <- testing(twist_tale_split)
+```
+
+# Paso 5a
+
+Crea una matriz de términos del documento _(document-term matrix)_. Para ello, necesitas excluir los datos de prueba de `twist_tale_preprocesado`con `anti_join()` o con `inner_join()`. Luego, necesitas contar los lemas y crear la matriz de términos del documento. Guarda los resultados a `sparse_train_data`.
+
+```{r}
+sparse_train_data <- twist_tale_preprocesado %>%
+  mutate(doc_id = as.integer(doc_id)) %>%
+  anti_join(twist_tale_testing, by = c("doc_id" = "line_id")) %>%
+  count(doc_id, lemma) %>%
+  cast_sparse(doc_id, lemma, n) #aqui le pone n no mas, pero no esta definido en ningun lado oe. Luego dice q "n" son los valores.
+```
+
+Tambien necesitamos guardar la variable de salida que queremos predecir. Para ello, necesitas excluir los datos de prueba y usar `filter()` con `pull()` en `es_two_cities` y guardar los resultados en `y`.
+
+```{r}
+y <- twist_tale_training %>%
+  filter(line_id %in% rownames(sparse_train_data)) %>%
+  pull(es_two_cities)
+```
+
+# Paso 6a
+
+Usa la función `cv.gmnet()` del paquete `gmnet` para calcular la regresión logística regularizada. para especificar la regresión logística, necestas asignar un valor `binomial` al argumento `family`. También es útil asignar a `TRUE` el valor del argumento `keep` de la función `cv.gmnet()`. Tambien se puede _paralelizar_ el ajuste del modelo ya sea con el paquete `doParallel`.
+
+```{r}
+model <- cv.glmnet(sparse_train_data, y, family = "binomial", keep = T, trace.it=1)
+```
+
+# Paso 7a
+
+Extraer los coeficientes del modelo con "el valor de lambda más grande con error entre una desviación estándar del mínimo" [para más detalles ver](https://stats.stackexchange.com/questions/138569/why-is-lambda-within-one-standard-error-from-the-minimum-is-a-recommended-valu). Para ello,es necesario extraer el elemento `glmnet.fit` del `model`, ordenarlo (tidy) con `tidy()` y escoger el modelo con el valor más grande de lambda con el error dentro del rango de una desviación estándar usando la función `filter()`.
+```{r}
+coeficientes <- model$glmnet.fit %>%
+  tidy() %>%
+  filter(lambda == model$lambda.1se)
+```
+
+# Paso 8
+
+Explora las palabras más "predichas" del modelo. Esos valores son almacenados en la columna `estimate`. los valores positivos significan que si esos lemas estan en la línea de texto, esta línea tendrá una mayor posibilidad de estar en "A Tale of Two Cities". los valores negativos significan que tienen mayor posibilidad de estar en "Oliver Twist".
+
+Extrae 5 de las palabras más predecibles de "A Tale of Two Cities" y "Oliver Twist". para ello, necesitas el dataset `group_by()`, `coeficientes`mediante la siguiente expresión lógica `estimate > 0` y luego usar `slice_max()` en el dataset de `coeficientes` agrupados (con group_by()). Esto dará como resultado las palabras más predecibles de "A Tale of Two Cities" y las menos predecibles de "Oliver Twist", debido a que `slice_max()` no corta los valores en valor absolito, para esto, se debería usar la función `abs()` en `estimate()`.
+
+```{r}
+coeficientes %>%
+  group_by(estimate > 0) %>%
+  slice_max(estimate, n = 5) %>%
+  ungroup()
+```
+
+Ahora se puede crear un `geom_com()` para visualizar los resultados.
+
+```{r}
+coeficientes %>%
+  group_by(estimate > 0) %>%
+  slice_max(estimate, n = 5) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_col(aes(x = fct_reorder(term, estimate), y = estimate, fill = estimate > 0)) + 
+  coord_flip()
+
+```
+
